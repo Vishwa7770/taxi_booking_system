@@ -1,0 +1,233 @@
+{% extends "taxiapp/base.html" %}
+{% block title %}Ride #{{ ride.id }} – TaxiApp{% endblock %}
+
+{% block extra_head %}
+<style>#map { height: 300px; border-radius: 12px; }</style>
+{% endblock %}
+
+{% block content %}
+<div class="container py-5">
+  <div class="row g-4">
+
+    <!-- Ride Details -->
+    <div class="col-md-8">
+      <div class="card mb-4">
+        <div class="card-header bg-dark text-warning fw-bold">
+          <i class="bi bi-taxi-front"></i> Ride #{{ ride.id }}
+          <span class="badge badge-status-{{ ride.status }} ms-2">{{ ride.get_status_display }}</span>
+        </div>
+        <div class="card-body">
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label text-muted">Pickup</label>
+              <p class="fw-semibold"><i class="bi bi-geo-alt text-success"></i> {{ ride.pickup_address }}</p>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label text-muted">Drop-off</label>
+              <p class="fw-semibold"><i class="bi bi-geo-alt-fill text-danger"></i> {{ ride.dropoff_address }}</p>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label text-muted">Rider</label>
+              <p>{{ ride.rider.get_full_name|default:ride.rider.username }}</p>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label text-muted">Driver</label>
+              <p>{{ ride.driver.get_full_name|default:ride.driver.username|default:"Not assigned" }}</p>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label text-muted">Vehicle Type</label>
+              <p>{{ ride.get_vehicle_type_requested_display }}</p>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label text-muted">Distance</label>
+              <p>{{ ride.distance_km|default:"–" }} km</p>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label text-muted">Estimated Fare</label>
+              <p>${{ ride.estimated_fare|default:"–" }}</p>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label text-muted">Final Fare</label>
+              <p class="fw-bold text-success">${{ ride.final_fare|default:"–" }}</p>
+            </div>
+            <div class="col-md-4">
+              <label class="form-label text-muted">Requested</label>
+              <p>{{ ride.requested_at|date:"M d, Y H:i" }}</p>
+            </div>
+            {% if ride.completed_at %}
+            <div class="col-md-4">
+              <label class="form-label text-muted">Completed</label>
+              <p>{{ ride.completed_at|date:"M d, Y H:i" }}</p>
+            </div>
+            {% endif %}
+          </div>
+
+          <!-- Driver action buttons -->
+          {% if user.is_driver and ride.driver == user %}
+          <hr />
+          <div class="d-flex gap-2 flex-wrap">
+            {% if ride.status == 'accepted' %}
+            <button onclick="updateRideStatus('start')" class="btn btn-primary">
+              <i class="bi bi-play-fill"></i> Start Ride
+            </button>
+            {% elif ride.status == 'in_progress' %}
+            <button onclick="updateRideStatus('complete')" class="btn btn-success">
+              <i class="bi bi-check-circle"></i> Complete Ride
+            </button>
+            {% endif %}
+            {% if ride.status not in 'completed,cancelled' %}
+            <button onclick="cancelRide()" class="btn btn-outline-danger">
+              <i class="bi bi-x-circle"></i> Cancel
+            </button>
+            {% endif %}
+          </div>
+          {% endif %}
+        </div>
+      </div>
+
+      <!-- Live map for in-progress rides -->
+      {% if ride.status == 'in_progress' or ride.status == 'accepted' %}
+      <div class="card mb-4">
+        <div class="card-header bg-dark text-white fw-bold">
+          <i class="bi bi-broadcast-pin text-warning"></i> Live Tracking
+        </div>
+        <div class="card-body p-0"><div id="map"></div></div>
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- Sidebar – payment + rating -->
+    <div class="col-md-4">
+      <!-- Payment info -->
+      {% if ride.status == 'completed' %}
+      <div class="card mb-4">
+        <div class="card-header bg-success text-white fw-bold"><i class="bi bi-credit-card"></i> Payment</div>
+        <ul class="list-group list-group-flush">
+          <li class="list-group-item">Amount: <strong>${{ ride.final_fare }}</strong></li>
+          <li class="list-group-item">Method: Cash / Card</li>
+          <li class="list-group-item">Status: <span class="badge bg-success">Paid</span></li>
+        </ul>
+      </div>
+      {% endif %}
+
+      <!-- Rating form -->
+      {% if ride.status == 'completed' and not already_rated %}
+      <div class="card">
+        <div class="card-header bg-warning text-dark fw-bold"><i class="bi bi-star-fill"></i> Leave a Rating</div>
+        <div class="card-body">
+          <form id="rating-form">
+            {% csrf_token %}
+            <div class="mb-3">
+              <label class="form-label">Score</label>
+              <div id="star-rating" class="fs-2">
+                <span class="star" data-val="1" onclick="setRating(1)">☆</span>
+                <span class="star" data-val="2" onclick="setRating(2)">☆</span>
+                <span class="star" data-val="3" onclick="setRating(3)">☆</span>
+                <span class="star" data-val="4" onclick="setRating(4)">☆</span>
+                <span class="star" data-val="5" onclick="setRating(5)">☆</span>
+              </div>
+              <input type="hidden" id="score-input" value="" />
+            </div>
+            <div class="mb-3">
+              <label class="form-label">Comment</label>
+              <textarea id="comment-input" class="form-control" rows="3" placeholder="Optional comment…"></textarea>
+            </div>
+            <button type="button" onclick="submitRating()" class="btn btn-taxi w-100">Submit Rating</button>
+          </form>
+        </div>
+      </div>
+      {% elif already_rated %}
+      <div class="alert alert-success"><i class="bi bi-check-circle"></i> You have already rated this ride.</div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+{% if ride.status == 'in_progress' or ride.status == 'accepted' %}
+<script>
+  const map = L.map('map').setView([{{ ride.pickup_latitude }}, {{ ride.pickup_longitude }}], 14);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+  L.marker([{{ ride.pickup_latitude }}, {{ ride.pickup_longitude }}]).addTo(map).bindPopup('Pickup');
+  L.marker([{{ ride.dropoff_latitude }}, {{ ride.dropoff_longitude }}]).addTo(map).bindPopup('Drop-off');
+
+  let driverMarker = null;
+  const ws = new WebSocket(`ws://${window.location.host}/ws/location/{{ ride.id }}/`);
+  ws.onmessage = function(e) {
+    const data = JSON.parse(e.data);
+    if (data.type === 'location_update') {
+      const latlng = [data.lat, data.lng];
+      if (driverMarker) {
+        driverMarker.setLatLng(latlng);
+      } else {
+        driverMarker = L.marker(latlng, {
+          icon: L.divIcon({ className: '', html: '<div style="font-size:1.8rem;">🚕</div>' })
+        }).addTo(map).bindPopup('Your Driver');
+      }
+      map.panTo(latlng);
+    }
+  };
+</script>
+{% endif %}
+
+<script>
+  let selectedRating = 0;
+  function setRating(val) {
+    selectedRating = val;
+    document.getElementById('score-input').value = val;
+    document.querySelectorAll('.star').forEach(s => {
+      s.textContent = parseInt(s.dataset.val) <= val ? '★' : '☆';
+    });
+  }
+
+  function submitRating() {
+    if (!selectedRating) { alert('Please select a star rating.'); return; }
+    // Determine who to rate
+    const ratedUser = {% if user.is_driver %}{{ ride.rider.id }}{% else %}{{ ride.driver.id|default:'null' }}{% endif %};
+    if (!ratedUser) { alert('Cannot rate: no driver assigned.'); return; }
+    fetch('/api/ratings/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') },
+      body: JSON.stringify({
+        ride: {{ ride.id }},
+        rated_user: ratedUser,
+        score: selectedRating,
+        comment: document.getElementById('comment-input').value
+      })
+    })
+    .then(r => r.json())
+    .then(data => {
+      if (data.id) {
+        alert('✅ Rating submitted! Thank you.');
+        location.reload();
+      } else {
+        alert('Error: ' + JSON.stringify(data));
+      }
+    });
+  }
+
+  function updateRideStatus(action) {
+    fetch(`/api/rides/{{ ride.id }}/${action}/`, {
+      method: 'POST',
+      headers: { 'X-CSRFToken': getCookie('csrftoken') }
+    })
+    .then(r => r.json())
+    .then(() => location.reload());
+  }
+
+  function cancelRide() {
+    if (!confirm('Cancel this ride?')) return;
+    fetch('/api/rides/{{ ride.id }}/cancel/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCookie('csrftoken') },
+      body: JSON.stringify({ reason: 'Cancelled by user' })
+    }).then(() => location.reload());
+  }
+
+  function getCookie(name) {
+    const v = document.cookie.match('(^|;) ?' + name + '=([^;]*)(;|$)');
+    return v ? v[2] : null;
+  }
+</script>
+{% endblock %}

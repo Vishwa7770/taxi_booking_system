@@ -1,0 +1,37 @@
+{% extends "taxiapp/base.html" %}
+{% block title %}TaxiApp – Ride in Style{% endblock %}
+{% block content %}
+<section class="py-5" style="background: linear-gradient(135deg, #1a1a2e 0%, #0f3460 100%); color: #fff; min-height: 80vh; display: flex; align-items: center;">
+  <div class="container text-center">
+    <h1 class="display-3 fw-bold mb-3">🚕 Your Ride, Your Way</h1>
+    <p class="lead mb-5 text-warning">Fast, safe, and reliable taxi booking at your fingertips.</p>
+    <div class="d-flex justify-content-center gap-3 flex-wrap">
+      <a href="{% url 'signup' %}" class="btn btn-taxi btn-lg px-5 py-3">Get Started</a>
+      <a href="{% url 'login' %}" class="btn btn-outline-light btn-lg px-5 py-3">Login</a>
+    </div>
+    <div class="row mt-5 g-4 text-center">
+      <div class="col-md-4">
+        <div class="card p-4 h-100" style="background: rgba(255,255,255,.1); border: none; color: #fff;">
+          <i class="bi bi-geo-alt-fill fs-1 text-warning"></i>
+          <h4 class="mt-3">Set Your Route</h4>
+          <p class="text-light">Enter pickup & drop-off and get an instant fare estimate.</p>
+        </div>
+      </div>
+      <div class="col-md-4">
+        <div class="card p-4 h-100" style="background: rgba(255,255,255,.1); border: none; color: #fff;">
+          <i class="bi bi-broadcast fs-1 text-warning"></i>
+          <h4 class="mt-3">Live Tracking</h4>
+          <p class="text-light">Watch your driver approach in real-time on the map.</p>
+        </div>
+      </div>
+      <div class="col-md-4">
+        <div class="card p-4 h-100" style="background: rgba(255,255,255,.1); border: none; color: #fff;">
+          <i class="bi bi-star-fill fs-1 text-warning"></i>
+          <h4 class="mt-3">Rate & Review</h4>
+          <p class="text-light">Share your experience and help keep our community safe.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+{% endblock %}

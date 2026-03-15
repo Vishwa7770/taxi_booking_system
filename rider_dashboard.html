@@ -1,0 +1,198 @@
+{% extends "taxiapp/base.html" %}
+{% block title %}Rider Dashboard – TaxiApp{% endblock %}
+
+{% block extra_head %}
+<style>
+  #map { height: 420px; border-radius: 12px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+  <div class="row">
+    <!-- Sidebar -->
+    <div class="col-md-2 sidebar d-none d-md-block">
+      <div class="text-center py-3">
+        <div style="font-size:3rem;">👤</div>
+        <div class="text-warning fw-bold">{{ user.first_name|default:user.username }}</div>
+        <small class="text-muted">⭐ {{ user.average_rating }}</small>
+      </div>
+      <hr style="border-color: #444;" />
+      <a href="{% url 'rider_dashboard' %}" class="active"><i class="bi bi-house"></i> Dashboard</a>
+      <a href="{% url 'ride_history' %}"><i class="bi bi-clock-history"></i> Ride History</a>
+      <a href="/api/" target="_blank"><i class="bi bi-code-slash"></i> API Explorer</a>
+      <a href="{% url 'logout' %}"><i class="bi bi-box-arrow-right"></i> Logout</a>
+    </div>
+
+    <!-- Main Content -->
+    <div class="col-md-10 py-4 px-4">
+      <h4 class="fw-bold mb-4">🗺️ Book a Ride</h4>
+      <p class="text-muted mb-3"><i class="bi bi-info-circle"></i> <strong>1st click</strong> on the map = Pickup (P) &nbsp;|&nbsp; <strong>2nd click</strong> = Drop-off (D)</p>
+
+      <!-- Booking Form – plain HTML POST, no fetch() needed -->
+      <div class="card mb-4">
+        <div class="card-body">
+          <form method="post" action="{% url 'book_ride' %}" id="booking-form">
+            {% csrf_token %}
+            <input type="hidden" name="pickup_lat"       id="pickup-lat" />
+            <input type="hidden" name="pickup_lng"       id="pickup-lng" />
+            <input type="hidden" name="dropoff_lat"      id="dropoff-lat" />
+            <input type="hidden" name="dropoff_lng"      id="dropoff-lng" />
+            <input type="hidden" name="pickup_address"   id="pickup-address-hidden" />
+            <input type="hidden" name="dropoff_address"  id="dropoff-address-hidden" />
+
+            <div class="row g-3">
+              <div class="col-md-5">
+                <label class="form-label fw-semibold"><i class="bi bi-geo-alt text-success"></i> Pickup Location</label>
+                <input type="text" id="pickup-display" class="form-control bg-light" placeholder="Click map to set pickup (P)" readonly />
+              </div>
+              <div class="col-md-5">
+                <label class="form-label fw-semibold"><i class="bi bi-geo-alt-fill text-danger"></i> Drop-off Location</label>
+                <input type="text" id="dropoff-display" class="form-control bg-light" placeholder="Click map again to set drop-off (D)" readonly />
+              </div>
+              <div class="col-md-2">
+                <label class="form-label fw-semibold">Vehicle Type</label>
+                <select name="vehicle_type" class="form-select">
+                  <option value="economy">Economy</option>
+                  <option value="comfort">Comfort</option>
+                  <option value="xl">XL / SUV</option>
+                  <option value="premium">Premium</option>
+                </select>
+              </div>
+              <div class="col-12 d-flex align-items-center gap-3 flex-wrap">
+                <button type="button" onclick="estimateFare()" class="btn btn-outline-primary">
+                  <i class="bi bi-calculator"></i> Estimate Fare
+                </button>
+                <button type="submit" onclick="return validateBooking()" class="btn btn-taxi px-4">
+                  <i class="bi bi-taxi-front"></i> Book Now
+                </button>
+                <span id="fare-display" class="fw-bold text-success fs-5"></span>
+              </div>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <!-- Live Map -->
+      <div class="card mb-4">
+        <div class="card-header bg-dark text-white fw-bold">
+          <i class="bi bi-map"></i> Live Map
+          <span class="badge bg-secondary ms-2" id="map-status">Connecting…</span>
+        </div>
+        <div class="card-body p-0">
+          <div id="map"></div>
+        </div>
+      </div>
+
+      <!-- Recent Rides -->
+      <div class="card">
+        <div class="card-header bg-dark text-warning fw-bold"><i class="bi bi-clock-history"></i> Recent Rides</div>
+        <div class="card-body p-0">
+          <table class="table table-hover mb-0">
+            <thead class="table-light">
+              <tr><th>#</th><th>Pickup</th><th>Drop-off</th><th>Fare</th><th>Status</th><th></th></tr>
+            </thead>
+            <tbody>
+              {% for ride in rides %}
+              <tr>
+                <td>{{ ride.id }}</td>
+                <td>{{ ride.pickup_address }}</td>
+                <td>{{ ride.dropoff_address }}</td>
+                <td>${{ ride.final_fare|default:ride.estimated_fare|default:"–" }}</td>
+                <td><span class="badge badge-status-{{ ride.status }}">{{ ride.get_status_display }}</span></td>
+                <td><a href="{% url 'ride_detail' ride.pk %}" class="btn btn-sm btn-outline-secondary">View</a></td>
+              </tr>
+              {% empty %}
+              <tr><td colspan="6" class="text-center text-muted py-4">No rides yet. Click the map above to book your first ride!</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+  // ── Leaflet Map ───────────────────────────────────────────────────────────
+  const map = L.map('map').setView([37.7749, -122.4194], 13);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap contributors'
+  }).addTo(map);
+
+  let pickupMarker = null, dropoffMarker = null;
+  let nextClick = 'pickup'; // toggles between 'pickup' and 'dropoff'
+
+  map.on('click', function(e) {
+    const lat = parseFloat(e.latlng.lat.toFixed(6));
+    const lng = parseFloat(e.latlng.lng.toFixed(6));
+    const label = `${lat}, ${lng}`;
+
+    if (nextClick === 'pickup') {
+      if (pickupMarker) map.removeLayer(pickupMarker);
+      pickupMarker = L.marker([lat, lng], {
+        icon: L.divIcon({ className: '', html: '<div style="background:#28a745;color:#fff;border-radius:50%;width:34px;height:34px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;box-shadow:0 2px 8px rgba(0,0,0,.4)">P</div>' })
+      }).addTo(map).bindPopup('📍 Pickup').openPopup();
+      document.getElementById('pickup-lat').value = lat;
+      document.getElementById('pickup-lng').value = lng;
+      document.getElementById('pickup-address-hidden').value = label;
+      document.getElementById('pickup-display').value = label;
+      nextClick = 'dropoff';
+    } else {
+      if (dropoffMarker) map.removeLayer(dropoffMarker);
+      dropoffMarker = L.marker([lat, lng], {
+        icon: L.divIcon({ className: '', html: '<div style="background:#dc3545;color:#fff;border-radius:50%;width:34px;height:34px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;box-shadow:0 2px 8px rgba(0,0,0,.4)">D</div>' })
+      }).addTo(map).bindPopup('🏁 Drop-off').openPopup();
+      document.getElementById('dropoff-lat').value = lat;
+      document.getElementById('dropoff-lng').value = lng;
+      document.getElementById('dropoff-address-hidden').value = label;
+      document.getElementById('dropoff-display').value = label;
+      nextClick = 'pickup';
+    }
+  });
+
+  // ── WebSocket: nearby drivers ─────────────────────────────────────────────
+  const driverMarkers = {};
+  try {
+    const ws = new WebSocket(`ws://${location.host}/ws/drivers/nearby/`);
+    ws.onopen  = () => { document.getElementById('map-status').textContent = 'Live'; document.getElementById('map-status').className = 'badge bg-success ms-2'; };
+    ws.onclose = () => { document.getElementById('map-status').textContent = 'Offline'; document.getElementById('map-status').className = 'badge bg-secondary ms-2'; };
+    ws.onmessage = function(e) {
+      const data = JSON.parse(e.data);
+      if (data.type === 'drivers_update') {
+        Object.values(driverMarkers).forEach(m => map.removeLayer(m));
+        data.drivers.forEach(d => {
+          if (d.lat && d.lng) {
+            driverMarkers[d.driver_id] = L.marker([d.lat, d.lng], {
+              icon: L.divIcon({ className: '', html: '<div style="font-size:1.8rem;filter:drop-shadow(0 2px 4px rgba(0,0,0,.5))">🚕</div>' })
+            }).addTo(map).bindPopup(`<b>${d.name}</b><br>${d.vehicle_type} ⭐ ${d.rating}`);
+          }
+        });
+      }
+    };
+  } catch(err) { console.log('WebSocket unavailable'); }
+
+  // ── Fare estimate (optional, uses API) ───────────────────────────────────
+  function estimateFare() {
+    const pLat = document.getElementById('pickup-lat').value;
+    const pLng = document.getElementById('pickup-lng').value;
+    const dLat = document.getElementById('dropoff-lat').value;
+    const dLng = document.getElementById('dropoff-lng').value;
+    if (!pLat || !dLat) { alert('Set Pickup and Drop-off on the map first.'); return; }
+    fetch(`/api/rides/fare-estimate/?pickup_lat=${pLat}&pickup_lng=${pLng}&dropoff_lat=${dLat}&dropoff_lng=${dLng}`)
+      .then(r => r.json())
+      .then(d => { if (d.estimated_fare) document.getElementById('fare-display').textContent = `~$${d.estimated_fare} · ${d.distance_km} km`; })
+      .catch(() => {});
+  }
+
+  // ── Validate before form submits ─────────────────────────────────────────
+  function validateBooking() {
+    if (!document.getElementById('pickup-lat').value)  { alert('Please click the map to set a Pickup (P) point first.'); return false; }
+    if (!document.getElementById('dropoff-lat').value) { alert('Please click the map again to set a Drop-off (D) point.'); return false; }
+    return true;
+  }
+</script>
+{% endblock %}
